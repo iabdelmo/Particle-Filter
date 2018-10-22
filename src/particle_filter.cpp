@@ -89,7 +89,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	for(int i = 0 ; i < this->num_particles ; i++)
 	{
 		// check if the yaw_rate !=0
-		if(((int)yaw_rate)!= 0  )
+		if(fabs(yaw_rate) > 0.00001 )
 		{
 			// use the  motion model equation with non-zero yaw_rate
 
@@ -232,20 +232,32 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		// Associate the tobservations with the inrange_landmarks
 		dataAssociation(inrange_map_landmarks,tobservations);
 
-		// Gussian multi-var norm.
-		double gauss_norm= (1/(2 * M_PI * std_landmark[0] * std_landmark[1]));
-		double exponent;
+		// reset weight for particle before calc.
+		 particles[i].weight = 1.0;
 
 		// loop on all observations for this particle and update the weight of it.
 		for(int j = 0 ; j < tobservations.size() ; j++)
 		{
 
-			exponent= (pow((tobservations[j].x - map_landmarks.landmark_list[tobservations[j].id].x_f),2))/
-					(2 * pow(std_landmark[0],2)) +
-					(pow((tobservations[j].y - map_landmarks.landmark_list[tobservations[j].id].y_f),2))/
-					(2 * pow(std_landmark[1],2));
+			double predicted_x, predicted_y, observed_x, observed_y, std_x, std_y;
+			int id;
 
-			particles[i].weight *= gauss_norm * exp((-1*exponent));
+			observed_x = tobservations[j].x;
+			observed_y = tobservations[j].y;
+			id = tobservations[j].id;
+
+			std_x = std_landmark[0];
+			std_y = std_landmark[1];
+
+			predicted_x = (double)map_landmarks.landmark_list[id-1].x_f;
+			predicted_y = (double)map_landmarks.landmark_list[id-1].y_f;
+
+
+			//Update the particle weights by multiplying the gaussian multivariate distributions
+			particles[i].weight *= 1.0/(2* M_PI * std_x * std_y) *
+					exp(-((pow(observed_x - predicted_x, 2) / (2 * pow(std_x,2))) +
+							(pow(observed_y - predicted_y, 2) / (2 * pow(std_y,2)))));
+
 
 			association_ids.push_back(tobservations[j].id);
 			sense_x.push_back(tobservations[j].x);
@@ -258,6 +270,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		SetAssociations(particles[i],association_ids,sense_x,sense_y);
 
 
+
 		// clear the tobservations and inrange_map_landmarks vectors for the next particle
 		//calculations.
 
@@ -267,7 +280,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		sense_x.clear();
 		sense_y.clear();
 
-		cout<<"weight "<<particles[i].weight<<endl;
 	}
 
 
@@ -277,6 +289,50 @@ void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+
+	default_random_engine gen;
+
+	//This vector contains the rsampled particles
+	std::vector<Particle> resampled_particles;
+
+	//choose random index
+	uniform_int_distribution<int> int_dist(0,this->num_particles-1);
+
+	int index = int_dist(gen);
+
+	double beta = 0.0;
+
+	std::vector<double> weights;
+
+	//collect all particles weights in the weights vector
+	for (int i=0; i<this->num_particles; i++)
+	{
+		weights.push_back(particles[i].weight);
+	}
+
+	// extract the maximum weight
+	double max_weight = *max_element(weights.begin(), weights.end());
+
+	uniform_real_distribution<double> double_dist(0,max_weight);
+
+
+	//run the resampling wheel
+	for (int i = 0; i< this->num_particles; i++)
+	{
+
+		beta = beta + 2.0 * double_dist(gen);
+
+		while (weights[index] < beta)
+		{
+			beta = beta - weights[index];
+			index = (index+1) % this->num_particles;
+		}
+
+		resampled_particles.push_back(particles[index]);
+	}
+
+	particles = resampled_particles;
+
 
 }
 
